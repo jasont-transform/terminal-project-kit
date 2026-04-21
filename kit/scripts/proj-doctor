@@ -1,0 +1,83 @@
+#!/bin/bash
+# proj-doctor — health check for the Claude Project Kit install.
+# Verifies every part of the kit is wired correctly.
+
+set -u
+
+# Ensure the kit's bundled bin dir (portable jq) is on PATH.
+export PATH="$HOME/.claude-project-kit/bin:$PATH"
+
+PROJECTS_DIR="$HOME/projects"
+ZSHRC="$HOME/.zshrc"
+ISSUES=0
+
+ok()   { printf "  \033[32m✓\033[0m  %s\n" "$1"; }
+warn() { printf "  \033[33m⚠\033[0m  %s\n" "$1"; ISSUES=$((ISSUES + 1)); }
+fail() { printf "  \033[31m✗\033[0m  %s\n" "$1"; ISSUES=$((ISSUES + 1)); }
+
+check() {
+  local label="$1"
+  local cmd="$2"
+  if eval "$cmd" >/dev/null 2>&1; then ok "$label"; else fail "$label"; fi
+}
+
+echo ""
+echo "Claude Project Kit — health check"
+echo "================================="
+echo ""
+echo "Kit install:"
+check "~/projects/ exists"                     "[ -d \"$PROJECTS_DIR\" ]"
+check "~/projects/.template/ exists"            "[ -d \"$PROJECTS_DIR/.template\" ]"
+check "~/projects/.newproj executable"         "[ -x \"$PROJECTS_DIR/.newproj\" ]"
+check "~/projects/.preship executable"         "[ -x \"$PROJECTS_DIR/.preship\" ]"
+check "~/projects/.ports.json valid JSON"       "jq empty \"$PROJECTS_DIR/.ports.json\""
+check "~/projects/INDEX.md exists"             "[ -f \"$PROJECTS_DIR/INDEX.md\" ]"
+
+echo ""
+echo "Dependencies:"
+check "jq available"                            "command -v jq"
+check "claude CLI available"                   "command -v claude"
+if command -v gh >/dev/null 2>&1; then
+  ok "gh CLI available (for proj-init-remote)"
+else
+  warn "gh CLI not found — proj-init-remote won't work until installed (https://cli.github.com)"
+fi
+
+echo ""
+echo "Shell integration:"
+check "~/.zshrc has proj function"             "grep -q 'Claude Code project switcher' \"$ZSHRC\""
+check "~/.zshrc syntax valid"                  "zsh -n \"$ZSHRC\""
+
+echo ""
+echo "Per-project wiring:"
+COUNT=0
+for dir in "$PROJECTS_DIR"/*/; do
+  [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  [[ "$name" = .* ]] && continue
+  COUNT=$((COUNT + 1))
+  echo "  $name:"
+  check "    .claude/settings.json present"           "[ -f \"${dir}.claude/settings.json\" ]"
+  check "    design-journal/ present"                 "[ -d \"${dir}design-journal\" ]"
+  check "    Stop hook script executable"             "[ -x \"${dir}design-journal/.journal-hook.sh\" ]"
+  check "    weekly launchd job loaded"               "launchctl list 2>/dev/null | grep -q \"design-journal-weekly-$name\""
+done
+
+if [ $COUNT -eq 0 ]; then
+  echo "  (no projects yet — create one with: newproj <name>)"
+fi
+
+echo ""
+echo "================================="
+if [ $ISSUES -eq 0 ]; then
+  printf "\033[32mAll good.\033[0m No issues found.\n"
+  exit 0
+else
+  printf "\033[31m%d issue(s) above.\033[0m\n" "$ISSUES"
+  echo "Fix suggestions:"
+  echo "  - Missing kit files: re-run ~/.claude-project-kit/install.sh"
+  echo "  - Missing jq: brew install jq"
+  echo "  - Shell function not loaded: open a new terminal, or 'source ~/.zshrc'"
+  echo "  - Launchd job missing: re-run 'newproj <name>' for that project (it registers the job)"
+  exit 1
+fi

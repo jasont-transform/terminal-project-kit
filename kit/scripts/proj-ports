@@ -1,0 +1,36 @@
+#!/bin/bash
+# proj-ports — show which projects are currently running on which ports.
+
+set -u
+
+# Ensure the kit's bundled bin dir (portable jq) is on PATH.
+export PATH="$HOME/.claude-project-kit/bin:$PATH"
+
+PORTS_FILE="$HOME/projects/.ports.json"
+if [ ! -f "$PORTS_FILE" ]; then
+  echo "No ports registry at $PORTS_FILE"
+  echo "Run the kit installer or create projects with 'newproj <name>' first."
+  exit 1
+fi
+
+echo ""
+printf "  %-30s  %-6s  %-8s  %s\n" "PROJECT" "PORT" "PID" "STATUS"
+printf "  %-30s  %-6s  %-8s  %s\n" "------------------------------" "------" "--------" "----------"
+
+COUNT=0
+jq -r '.projects | to_entries[] | "\(.key)\t\(.value)"' "$PORTS_FILE" 2>/dev/null | while IFS=$'\t' read -r name port; do
+  COUNT=$((COUNT + 1))
+  pid=$(lsof -ti tcp:"$port" 2>/dev/null | head -1)
+  if [ -n "$pid" ]; then
+    status="running"
+  else
+    pid="—"
+    status="—"
+  fi
+  printf "  %-30s  %-6s  %-8s  %s\n" "$name" "$port" "$pid" "$status"
+done
+
+echo ""
+echo "  Kill a running dev server:  kill <PID>"
+echo "  Kill everything on a port:  kill \$(lsof -ti tcp:<port>)"
+echo ""

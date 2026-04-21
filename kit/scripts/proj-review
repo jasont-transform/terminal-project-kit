@@ -1,0 +1,39 @@
+#!/bin/bash
+# proj-review — coaching review of the current project.
+# Run from inside a project directory.
+
+set -u
+
+PROJECT_DIR=$(pwd)
+if [ ! -d "$PROJECT_DIR/design-journal" ]; then
+  echo "Not inside a project directory (no design-journal/ here)."
+  echo "Run 'proj <name>' to jump into one first, then 'proj-review' here."
+  exit 1
+fi
+
+NAME=$(basename "$PROJECT_DIR")
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "claude CLI not found. Install from https://claude.com/claude-code"
+  exit 1
+fi
+
+PROMPT="You are doing a coaching review for the '$NAME' project. Its design journal is at $PROJECT_DIR/design-journal/.
+
+Read these in full:
+- $PROJECT_DIR/design-journal/logbook/ (all files, most recent first)
+- $PROJECT_DIR/design-journal/decisions/ (all files)
+- $PROJECT_DIR/design-journal/experiments/ (all files)
+- $PROJECT_DIR/design-journal/training-manual.md
+
+Produce a concise coaching note (under 400 words) in Markdown, with three sections:
+
+1. **What is working well** — evidence of strong thinking or execution. Be specific — cite decisions or logbook moments by ID.
+2. **What seems stuck** — recurring problems, same questions being re-asked, decisions deferred, open threads that keep appearing week after week.
+3. **What I would push on next** — one concrete challenge, in the form of a question or a task, that would move the project forward the most.
+
+Be direct, not cheerleading. The user is a serious designer who wants truth, not encouragement. Do not list everything you found — filter ruthlessly to the points that matter most right now.
+
+Print the Markdown to stdout. Do not modify any files."
+
+claude -p --permission-mode acceptEdits "$PROMPT"

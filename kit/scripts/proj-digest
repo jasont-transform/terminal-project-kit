@@ -1,0 +1,53 @@
+#!/bin/bash
+# proj-digest — one-screen summary across all your projects for the past week.
+
+set -u
+
+PROJECTS_DIR="$HOME/projects"
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "claude CLI not found. Install from https://claude.com/claude-code"
+  exit 1
+fi
+
+# Collect active project directories
+PROJECT_LIST=""
+for dir in "$PROJECTS_DIR"/*/; do
+  [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  [[ "$name" = .* ]] && continue
+  PROJECT_LIST="$PROJECT_LIST$dir\n"
+done
+
+if [ -z "$PROJECT_LIST" ]; then
+  echo "No projects yet. Create one with 'newproj <name>'."
+  exit 0
+fi
+
+PROMPT="You are producing a cross-project weekly digest for the user's projects at $PROJECTS_DIR/.
+
+Projects to include:
+$(echo -e "$PROJECT_LIST")
+
+For each project directory:
+- Read logbook entries in <project>/design-journal/logbook/ that were modified or created in the past 7 days.
+- Note any new decision files in <project>/design-journal/decisions/ added in the same window.
+- Note any new experiment files in <project>/design-journal/experiments/ added in the same window.
+
+Produce a single Markdown document, structured:
+
+# Digest — week ending $(date +%Y-%m-%d)
+
+## <project-name>
+- **Sessions this week:** N
+- **Key insights:** 1–3 bullets — non-obvious takeaways only, not task summaries.
+- **Decisions made:** list by NNN and title (or 'none').
+- **Open threads:** bullets pulled from 'Open threads' sections in logbooks (or 'none').
+
+Repeat for every active project. Skip any project with zero activity this week (just mention the name with '— quiet week').
+
+Be terse. Total document under 60 seconds to read. Filter ruthlessly. Signal over completeness.
+
+Print the Markdown to stdout. Do not modify any files."
+
+claude -p --permission-mode acceptEdits "$PROMPT"

@@ -1,0 +1,145 @@
+#!/bin/bash
+# newproj <project-name>
+# Scaffolds a new project at ~/projects/<name> with the full kit:
+# directory layout, CLAUDE.md, design-journal, per-project Stop hook,
+# weekly launchd job, assigned port, entry in INDEX.md.
+
+set -eu
+
+# Ensure the kit's bundled bin dir (for portable jq) is on PATH.
+export PATH="$HOME/.claude-project-kit/bin:$PATH"
+
+if [ $# -ne 1 ]; then
+  cat >&2 <<'USAGE'
+Usage: newproj <project-name>
+
+Creates ~/projects/<name>/ from the template, assigns the next free port,
+installs the weekly launchd job, and registers the project in INDEX.md and
+.ports.json.
+USAGE
+  exit 1
+fi
+
+NAME="$1"
+PROJECTS_DIR="$HOME/projects"
+TEMPLATE="$PROJECTS_DIR/.template"
+TARGET="$PROJECTS_DIR/$NAME"
+PORTS_FILE="$PROJECTS_DIR/.ports.json"
+INDEX="$PROJECTS_DIR/INDEX.md"
+
+# Name validation
+if [[ ! "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "Error: project name must be lowercase alphanumeric with hyphens (e.g. 'my-project')." >&2
+  exit 1
+fi
+if [[ "$NAME" == "."* ]]; then
+  echo "Error: project name must not start with a dot." >&2
+  exit 1
+fi
+if [ -d "$TARGET" ]; then
+  echo "Error: $TARGET already exists." >&2
+  exit 1
+fi
+
+# Ensure ports file exists
+if [ ! -f "$PORTS_FILE" ]; then
+  echo '{"next": 3001, "projects": {}}' > "$PORTS_FILE"
+fi
+
+# Assign next port (via jq — pre-installed on macOS)
+PORT=$(jq -r '.next' "$PORTS_FILE")
+jq --arg name "$NAME" --argjson port "$PORT" \
+    '.projects[$name] = $port | .next = ($port + 1)' \
+    "$PORTS_FILE" > "$PORTS_FILE.tmp" && mv "$PORTS_FILE.tmp" "$PORTS_FILE"
+
+echo "Creating $TARGET on port $PORT..."
+
+# Copy template
+cp -R "$TEMPLATE" "$TARGET"
+
+# Rename gitignore template to .gitignore (template dirs can't contain leading dot files cleanly)
+if [ -f "$TARGET/gitignore.template" ]; then
+  mv "$TARGET/gitignore.template" "$TARGET/.gitignore"
+fi
+
+# Substitute placeholders in all text files within the new project.
+# We do this with a portable sed in-place (-i '') across known extensions.
+find "$TARGET" -type f \( \
+  -name "*.md" -o \
+  -name "*.json" -o \
+  -name "*.sh" -o \
+  -name ".gitignore" -o \
+  -name ".env.example" -o \
+  -name "CLAUDE.md" \
+\) -print0 | while IFS= read -r -d '' f; do
+  sed -i '' \
+    -e "s|__PROJECT_NAME__|$NAME|g" \
+    -e "s|__PROJECT_PORT__|$PORT|g" \
+    -e "s|__PROJECT_DIR__|$TARGET|g" \
+    -e "s|__TODAY__|$(date +%Y-%m-%d)|g" \
+    "$f"
+done
+
+# Make hook scripts executable
+chmod +x "$TARGET/design-journal/.journal-hook.sh" 2>/dev/null || true
+chmod +x "$TARGET/design-journal/.weekly-digest.sh" 2>/dev/null || true
+chmod +x "$TARGET/.claude/hooks/session-start.sh" 2>/dev/null || true
+
+# Install weekly launchd job
+PLIST="$HOME/Library/LaunchAgents/com.jasont.design-journal-weekly-$NAME.plist"
+cat > "$PLIST" <<PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jasont.design-journal-weekly-$NAME</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>$TARGET/design-journal/.weekly-digest.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>$TARGET/design-journal/.weekly.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TARGET/design-journal/.weekly.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
+PLISTEOF
+launchctl unload "$PLIST" 2>/dev/null || true
+launchctl load "$PLIST"
+
+# Register in INDEX.md — insert row before the "## Archived" section, if not already present
+TODAY=$(date +%Y-%m-%d)
+if ! grep -q "^| $NAME |" "$INDEX" 2>/dev/null; then
+  awk -v row="| $NAME | $PORT | $TODAY | |" '
+    /^## Archived/ && !inserted { print row; print ""; inserted = 1 }
+    { print }
+  ' "$INDEX" > "$INDEX.tmp" && mv "$INDEX.tmp" "$INDEX"
+fi
+
+echo ""
+echo "✓  Project '$NAME' created on port $PORT"
+echo ""
+echo "Next steps:"
+echo "  proj $NAME          # jump into it and resume/start a Claude Code session"
+echo "  cd $TARGET          # or cd manually"
+echo ""
+echo "Weekly digest scheduled: Mondays 09:00 (launchd job $PLIST)"

@@ -1,0 +1,46 @@
+#!/bin/bash
+# proj-init-remote — create a GitHub repo for the current project and push.
+# Uses the gh CLI. Defaults to private.
+
+set -u
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh CLI not found. Install from https://cli.github.com/"
+  exit 1
+fi
+
+PROJECT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+NAME=$(basename "$PROJECT_DIR")
+cd "$PROJECT_DIR"
+
+# Init git if needed
+if [ ! -d .git ]; then
+  echo "Initialising git repository..."
+  git init -q
+fi
+
+# Refuse if remote already set
+if git remote get-url origin >/dev/null 2>&1; then
+  echo "Remote 'origin' already set: $(git remote get-url origin)"
+  exit 0
+fi
+
+# Stage everything that isn't gitignored, make first commit if no HEAD
+if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+  git add .
+  git commit -q -m "Initial commit" || true
+fi
+
+# Visibility flag
+VIS="${VISIBILITY:-private}"
+if [ "$VIS" != "private" ] && [ "$VIS" != "public" ]; then
+  echo "VISIBILITY must be 'private' or 'public' (got '$VIS')"
+  exit 1
+fi
+
+echo "Creating $VIS GitHub repo for '$NAME'..."
+gh repo create "$NAME" --"$VIS" --source=. --remote=origin --push
+
+echo ""
+echo "✓ Repo created and pushed. Remote:"
+git remote get-url origin

@@ -1,0 +1,45 @@
+#!/bin/bash
+# proj-tour — scaffold a pre-populated example project so you can see what
+# a healthy project looks like before you touch your own.
+
+set -u
+
+NAME="tour-demo"
+TARGET="$HOME/projects/$NAME"
+KIT_DIR="${CLAUDE_KIT_DIR:-$HOME/.claude-project-kit}"
+
+if [ -d "$TARGET" ]; then
+  echo "Tour project already exists at $TARGET."
+  echo "  Open it:     proj $NAME"
+  echo "  Remove it:   rm -rf $TARGET  (and remove its launchd job via: launchctl remove com.jasont.design-journal-weekly-$NAME)"
+  exit 0
+fi
+
+# Scaffold via newproj (assigns port, wires launchd, registers in INDEX)
+"$HOME/projects/.newproj" "$NAME" >/dev/null
+
+# Replace the empty design-journal content with the tour content
+if [ -d "$KIT_DIR/kit/tour/design-journal" ]; then
+  # Preserve the hook scripts and README in the target
+  for subdir in logbook decisions experiments artefacts; do
+    if [ -d "$KIT_DIR/kit/tour/design-journal/$subdir" ]; then
+      cp -R "$KIT_DIR/kit/tour/design-journal/$subdir/." "$TARGET/design-journal/$subdir/"
+    fi
+  done
+  for f in training-manual.md glossary.md; do
+    if [ -f "$KIT_DIR/kit/tour/design-journal/$f" ]; then
+      cp "$KIT_DIR/kit/tour/design-journal/$f" "$TARGET/design-journal/$f"
+    fi
+  done
+else
+  echo "Warning: tour source not found at $KIT_DIR/kit/tour/design-journal — project created empty."
+fi
+
+echo ""
+echo "✓ Tour project scaffolded at $TARGET"
+echo ""
+echo "It has example logbook entries, decisions, experiments, training-manual entries,"
+echo "and a glossary — so you can see what a healthy project looks like."
+echo ""
+echo "  proj $NAME    # open it and browse"
+echo ""

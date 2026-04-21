@@ -1,0 +1,104 @@
+#!/bin/bash
+# Pre-ship check — run from inside a project before git push.
+# Scans for secrets, client data, missing docs, tracked .env, remote org.
+
+set -u
+
+PROJECT_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$PROJECT_DIR" ]; then
+  echo "Error: not inside a git repository." >&2
+  exit 1
+fi
+
+NAME=$(basename "$PROJECT_DIR")
+ISSUES=0
+warn() { echo "  ⚠  $1"; ISSUES=$((ISSUES + 1)); }
+fail() { echo "  ✗  $1"; ISSUES=$((ISSUES + 1)); }
+ok()   { echo "  ✓  $1"; }
+
+echo "Pre-ship checks for $NAME"
+echo "================================"
+echo ""
+
+cd "$PROJECT_DIR"
+
+# 1. README present
+echo "Documentation:"
+if [ ! -f "README.md" ]; then
+  fail "README.md is missing"
+else
+  ok "README.md present"
+fi
+
+# 2. LICENSE (soft)
+if [ ! -f "LICENSE" ] && [ ! -f "LICENSE.md" ] && [ ! -f "LICENSE.txt" ]; then
+  warn "LICENSE missing — consider adding MIT, Apache-2.0, or a proprietary notice"
+else
+  ok "LICENSE present"
+fi
+
+echo ""
+echo "Secrets scan:"
+
+# 3. Secrets scan on tracked files
+SECRET_PATTERNS='(AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID=[A-Z0-9]{16,}|api[_-]?key\s*[=:]\s*["'"'"'][A-Za-z0-9_\-]{16,}|BEGIN (RSA|OPENSSH|DSA|EC) PRIVATE KEY|Bearer [A-Za-z0-9_\-\.]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{30,}|xoxb-[A-Za-z0-9-]{20,})'
+HITS=$(git ls-files -z 2>/dev/null | xargs -0 grep -lE "$SECRET_PATTERNS" 2>/dev/null | grep -v '\.example$' | grep -v -i '\.preship$' || true)
+if [ -n "$HITS" ]; then
+  fail "Possible secrets detected in tracked files:"
+  echo "$HITS" | sed 's/^/        /'
+else
+  ok "No obvious secrets in tracked files"
+fi
+
+# 4. Tracked .env files (except .example)
+ENV_HITS=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.example$' || true)
+if [ -n "$ENV_HITS" ]; then
+  fail ".env file(s) are being tracked — should be gitignored:"
+  echo "$ENV_HITS" | sed 's/^/        /'
+else
+  ok "No tracked .env files"
+fi
+
+# 5. Tracked client-data / private
+CD_HITS=$(git ls-files | grep -E '^(client-data|private)/' | head -5 || true)
+if [ -n "$CD_HITS" ]; then
+  fail "client-data/ or private/ files are tracked:"
+  echo "$CD_HITS" | sed 's/^/        /'
+else
+  ok "client-data/ and private/ are not tracked"
+fi
+
+echo ""
+echo "Code hygiene:"
+
+# 6. WIP / DEBUG markers (warning only)
+WIP_HITS=$(git ls-files -z 2>/dev/null | xargs -0 grep -nE '\b(FIXME|XXX|HACK|DEBUGGER)\b' 2>/dev/null | head -5 || true)
+if [ -n "$WIP_HITS" ]; then
+  warn "WIP markers found (first 5) — review before shipping:"
+  echo "$WIP_HITS" | sed 's/^/        /'
+else
+  ok "No WIP markers (FIXME/XXX/HACK/DEBUGGER)"
+fi
+
+echo ""
+echo "Remote:"
+
+# 7. Remote org check
+REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
+if [ -z "$REMOTE" ]; then
+  warn "No remote 'origin' set — add one with: git remote add origin <url>"
+elif [[ "$REMOTE" == *"transform"* ]] || [[ "$REMOTE" == *"jasont-transform"* ]]; then
+  ok "Remote on a Transform org: $REMOTE"
+else
+  warn "Remote is '$REMOTE' — NOT on a Transform org. Intentional?"
+fi
+
+echo ""
+echo "================================"
+if [ $ISSUES -eq 0 ]; then
+  echo "✓  All checks passed. Safe to push."
+  exit 0
+else
+  echo "$ISSUES issue(s) above. Review before pushing."
+  exit 1
+fi
