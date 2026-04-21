@@ -7,7 +7,7 @@ A batteries-included kit for running serious work in [Claude Code](https://claud
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jasont-transform/terminal-mode-project-kit/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jasont-transform/terminal-project-kit/main/install.sh | bash
 ```
 
 Open a new terminal, then:
