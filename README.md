@@ -1,4 +1,4 @@
-# Claude Project Kit
+# Terminal Project Kit
 
 A batteries-included kit for running serious work in [Claude Code](https://claude.com/claude-code) across many projects. Every project gets a self-updating design journal, a training manual, and automation that runs itself.
 
